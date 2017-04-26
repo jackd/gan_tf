@@ -11,7 +11,7 @@ gan.train(generator_input_fn, real_sample_fn, max_steps=10**6)
 See `example/mnist/*` for MNIST training/generation example.
 
 ## Implemented GANs:
-* `gan.py`: vanillar GAN
+* `gan.py`: vanilla GAN
 * `w_gan.py`: Wasserstein GAN
 
 GAN logic based on [this work](https://github.com/wiseodd/generative-models/blob/master/GAN/).
