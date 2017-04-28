@@ -38,7 +38,7 @@ def _load_global_step_from_checkpoint_dir(checkpoint_dir):
         checkpoint_reader = training.NewCheckpointReader(
             training.latest_checkpoint(checkpoint_dir))
         return checkpoint_reader.get_tensor(ops.GraphKeys.GLOBAL_STEP)
-    except:  # pylint: disable=bare-except
+    except Exception:
         return 0
 
 
@@ -122,13 +122,15 @@ class Gan(object):
             self._critic_logits_kwargs['mode'] = mode
         return self._critic_logits_fn(sample, **self._critic_logits_kwargs)
 
-    def get_scoped_generator_sample(self, features, mode, reuse=None):
+    def get_scoped_generator_sample(
+            self, features, mode=tf.estimator.ModeKeys.PREDICT, reuse=None):
         """Get the discriminator sample wrapped in a variable scope."""
         with tf.variable_scope('generator', reuse=reuse):
             sample = self._call_generator_fn(features, mode)
         return sample
 
-    def get_scoped_critic_logits(self, sample, mode, reuse=None):
+    def get_scoped_critic_logits(
+            self, sample, mode=tf.estimator.ModeKeys.PREDICT, reuse=None):
         """Get the critic logits wrapped in a variable scope."""
         with tf.variable_scope('critic', reuse=reuse):
             logits = self._call_critit_logits_fn(sample, mode)
