@@ -117,7 +117,7 @@ class Gan(object):
             self._generator_kwargs['mode'] = mode
         return self._generator_fn(features=features, **self._generator_kwargs)
 
-    def _call_critit_logits_fn(self, sample, mode):
+    def _call_critic_logits_fn(self, sample, mode):
         if mode in self._critic_logits_kwargs:
             self._critic_logits_kwargs['mode'] = mode
         return self._critic_logits_fn(sample, **self._critic_logits_kwargs)
@@ -133,7 +133,7 @@ class Gan(object):
             self, sample, mode=tf.estimator.ModeKeys.PREDICT, reuse=None):
         """Get the critic logits wrapped in a variable scope."""
         with tf.variable_scope('critic', reuse=reuse):
-            logits = self._call_critit_logits_fn(sample, mode)
+            logits = self._call_critic_logits_fn(sample, mode)
         return logits
 
     def get_losses(self, real_logits, fake_logits):
@@ -222,8 +222,9 @@ class Gan(object):
 
         with ops.Graph().as_default() as g:
             global_step = training.create_global_step(g)
-            generator_inputs = generator_input_fn()
-            real_samples = real_sample_fn()
+            generator_inputs = generator_input_fn(
+                **self._fn_kwargs(generator_input_fn))
+            real_samples = real_sample_fn(**self._fn_kwargs(real_sample_fn))
 
             c_ops, g_ops = self.get_train_ops(
                 generator_inputs, real_samples, global_step)
@@ -313,6 +314,6 @@ class Gan(object):
         """Get the model logits that the output of sample_input_fn is real."""
         sample = sample_input_fn()
         with tf.variable_scope('critic'):
-            logits = self._call_critit_logits_fn(sample, mode)
+            logits = self._call_critic_logits_fn(sample, mode)
             probs = tf.nn.sigmoid(logits)
         return self._run_sess(probs, iterate_batches=iterate_batches)
