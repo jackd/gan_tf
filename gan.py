@@ -48,7 +48,7 @@ class Gan(object):
     """
 
     def __init__(self, generator_fn, critic_logits_fn, model_dir=None,
-                 config=None, params={}):
+                 config=None, params=None):
         """
         Construct a `Gan` instance.
 
@@ -75,6 +75,8 @@ class Gan(object):
                 * Returns:
                     * critic_logits
         """
+        if params is None:
+            params = {}
         if generator_fn is None or critic_logits_fn is None:
             raise ValueError(
                 'generator_fn and critic_logits_fn cannot be None')
