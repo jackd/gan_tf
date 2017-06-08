@@ -23,6 +23,8 @@ class WGan(Gan):
         c_real_loss = -tf.reduce_mean(real_logits)
         c_loss = c_fake_loss + c_real_loss
 
+        tf.summary.scalar('c_loss_real', c_real_loss)
+        tf.summary.scalar('c_loss_fake', c_fake_loss)
         tf.summary.scalar('c_loss', c_loss)
         tf.summary.scalar('g_loss', g_loss)
         return c_loss, g_loss
