@@ -36,6 +36,7 @@ class WGan(Gan):
         Returns:
             c_ops: critic train ops. Must contain at least loss and opt
             g_opt: generator train ops. Must contain at least loss and opt.
+
         """
         c_ops, g_ops = super(WGan, self).get_train_ops(
             real_logits, fake_logits, global_step)
