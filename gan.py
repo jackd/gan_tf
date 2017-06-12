@@ -92,7 +92,8 @@ class Gan(object):
 
         self._config = config
         self._model_dir = model_dir
-        self._params = params
+        self._params = self._default_params()
+        self._params.update(params)
         self._generator_fn = generator_fn
         self._critic_logits_fn = critic_logits_fn
         if not os.path.isdir(model_dir):
@@ -100,6 +101,19 @@ class Gan(object):
         self._generator_kwargs = self._fn_kwargs(generator_fn)
         self._critic_logits_kwargs = self._fn_kwargs(critic_logits_fn)
         self._name = name
+
+    @property
+    def params(self):
+        """Get a copy of the parameters passed to the constructor."""
+        return self._params.copy()
+
+    @staticmethod
+    def _default_params():
+        return {
+            'critic_learning_rate': 1e-4,
+            'generator_learning_rate': 1e-4,
+            'n_critic_loops': 5,
+        }.copy()
 
     def _named(self, unmodified_name):
         if self._name is None:
@@ -147,7 +161,8 @@ class Gan(object):
             logits = self._call_critic_logits_fn(sample, mode)
         return logits
 
-    def get_losses(self, real_logits, fake_logits):
+    def get_losses(
+            self, real_logits, fake_logits, real_samples, fake_samples, mode):
         """
         Get losses associated with this GAN.
 
@@ -181,6 +196,22 @@ class Gan(object):
         """Get all variables associated with the generator."""
         return self._vars('generator', graph=graph)
 
+    def get_critic_opt(self, critic_loss, critic_vars, global_step):
+        """Get critic optimization operation."""
+        c_lr = self._params['critic_learning_rate'] \
+            if 'critic_learning_rate' in self._params else 1e-4
+        critic_opt = tf.train.RMSPropOptimizer(c_lr).minimize(
+            critic_loss, var_list=critic_vars, global_step=global_step)
+        return critic_opt
+
+    def get_generator_opt(self, g_loss, global_step):
+        generator_vars = self.generator_vars()
+        g_lr = self._params['generator_learning_rate'] \
+            if 'generator_learning_rate' in self._params else 1e-4
+        g_opt = tf.train.RMSPropOptimizer(g_lr).minimize(
+            g_loss, var_list=generator_vars, global_step=global_step)
+        return g_opt
+
     def get_train_ops(self, generator_inputs, real_samples, global_step):
         """
         Get operations for training critic and generator.
@@ -196,23 +227,24 @@ class Gan(object):
         fake_logits = self.get_scoped_critic_logits(fake_samples, mode)
         real_logits = self.get_scoped_critic_logits(
             real_samples, mode, reuse=True)
-        c_loss, g_loss = self.get_losses(real_logits, fake_logits)
+        critic_loss, generator_loss = self.get_losses(
+            real_logits, fake_logits, real_samples, fake_samples, mode=mode)
+        tf.summary.scalar('c_loss', critic_loss)
+        tf.summary.scalar('g_loss', generator_loss)
 
         critic_vars = self.critic_vars()
+        with tf.variable_scope(self._named('c_opt')):
+            critic_opt = self.get_critic_opt(
+                critic_loss, critic_vars, global_step)
+
         generator_vars = self.generator_vars()
-        c_lr = self._params['critic_learning_rate'] \
-            if 'critic_learning_rate' in self._params else 1e-4
-        g_lr = self._params['generator_learning_rate'] \
-            if 'generator_learning_rate' in self._params else 1e-4
+        with tf.variable_scope(self._names('g_opt')):
+            generator_opt = self.get_generator_opt(
+                generator_loss, generator_vars, global_step)
 
-        c_opt = tf.train.RMSPropOptimizer(c_lr).minimize(
-            c_loss, var_list=critic_vars, global_step=global_step)
-        g_opt = tf.train.RMSPropOptimizer(g_lr).minimize(
-            g_loss, var_list=generator_vars, global_step=global_step)
-
-        c_ops = {'loss': c_loss, 'opt': c_opt}
-        g_ops = {'loss': g_loss, 'opt': g_opt}
-        return c_ops, g_ops
+        critic_ops = {'loss': critic_loss, 'opt': critic_opt}
+        generator_ops = {'loss': generator_loss, 'opt': generator_opt}
+        return critic_ops, generator_ops
 
     def train(self, generator_input_fn, real_sample_fn, real_iters_per_fake=5,
               steps=None, max_steps=None):
@@ -287,16 +319,21 @@ class Gan(object):
                 save_summaries_steps=self._config.save_summary_steps,
                 config=config_pb2.ConfigProto(allow_soft_placement=True)
             ) as mon_sess:
-                c_op_vals = {'loss': None}
-                g_op_vals = {'loss': None}
-                while not mon_sess.should_stop():
-                    for i in range(real_iters_per_fake):
-                        c_op_vals = mon_sess.run(c_ops)
-
-                    g_op_vals = mon_sess.run(g_ops)
+                c_op_vals, g_op_vals = self._train(mon_sess, c_ops, g_ops)
             logging.info('Last evaluated losses: critic: %s, generator, %s'
                          % (c_op_vals['loss'], g_op_vals['loss']))
         return self
+
+    def _train(self, monitored_session, c_ops, g_ops):
+        c_op_vals = {'loss': None}
+        g_op_vals = {'loss': None}
+        n_critic_loops = self._params['n_critic_loops']
+        while not monitored_session.should_stop():
+            for i in range(n_critic_loops):
+                c_op_vals = monitored_session.run(c_ops)
+
+            g_op_vals = monitored_session.run(g_ops)
+        return c_op_vals, g_op_vals
 
     def _run_sess(self, outputs, iterate_batches):
         checkpoint_path = saver.latest_checkpoint(self._model_dir)
