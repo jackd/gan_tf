@@ -204,12 +204,12 @@ class Gan(object):
             critic_loss, var_list=critic_vars, global_step=global_step)
         return critic_opt
 
-    def get_generator_opt(self, g_loss, global_step):
-        generator_vars = self.generator_vars()
+    def get_generator_opt(self, generator_loss, generator_vars, global_step):
+        """Get generator optimization operation."""
         g_lr = self._params['generator_learning_rate'] \
             if 'generator_learning_rate' in self._params else 1e-4
         g_opt = tf.train.RMSPropOptimizer(g_lr).minimize(
-            g_loss, var_list=generator_vars, global_step=global_step)
+            generator_loss, var_list=generator_vars, global_step=global_step)
         return g_opt
 
     def get_train_ops(self, generator_inputs, real_samples, global_step):
@@ -238,7 +238,7 @@ class Gan(object):
                 critic_loss, critic_vars, global_step)
 
         generator_vars = self.generator_vars()
-        with tf.variable_scope(self._names('g_opt')):
+        with tf.variable_scope(self._named('g_opt')):
             generator_opt = self.get_generator_opt(
                 generator_loss, generator_vars, global_step)
 

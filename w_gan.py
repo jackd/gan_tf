@@ -83,9 +83,10 @@ class GradientPenalizedWGan(WGan):
             g_loss: generator loss
         """
         c_loss, g_loss = super(GradientPenalizedWGan, self).get_losses(
-            real_logits, fake_logits, real_samples, fake_samples)
+            real_logits, fake_logits, real_samples, fake_samples, mode)
         batch_size = self._params['batch_size']
-        eps = tf.random_uniform(shape=(batch_size,), name='eps')
+        eps_shape = [batch_size] + [1]*(len(real_samples.shape)-1)
+        eps = tf.random_uniform(shape=eps_shape, name='eps')
         mixed_samples = eps * real_samples + (1 - eps) * fake_samples
         mixed_logits = self.get_scoped_critic_logits(
             mixed_samples, mode=mode, reuse=True)
@@ -121,15 +122,15 @@ class GradientPenalizedWGan(WGan):
         #
         # return c_loss, g_loss
 
-        @staticmethod
-        def _default_params():
-            params = WGan._default_params()
-            params.update({
-                'beta1': 0.0,
-                'beta2': 0.9,
-                'gradient_loss_factor': 10.0,
-            })
-            return params
+    @staticmethod
+    def _default_params():
+        params = WGan._default_params()
+        params.update({
+            'beta1': 0.0,
+            'beta2': 0.9,
+            'gradient_loss_factor': 10.0,
+        })
+        return params
 
     def get_critic_opt(self, critic_loss, critic_vars, global_step):
         """Get critic optimization operation."""
