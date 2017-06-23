@@ -308,6 +308,11 @@ class Gan(object):
                             scaffold=scaffold)
                     ]
 
+            session_config = self._config.session_config
+            if session_config is None:
+                session_config = config_pb2.ConfigProto(
+                    allow_soft_placement=True)
+
             with training.MonitoredTrainingSession(
                 master=self._config.master,
                 is_chief=self._config.is_chief,
@@ -317,7 +322,7 @@ class Gan(object):
                 chief_only_hooks=chief_hooks,
                 save_checkpoint_secs=0,  # saving handled by a hook?
                 save_summaries_steps=self._config.save_summary_steps,
-                config=config_pb2.ConfigProto(allow_soft_placement=True)
+                config=session_config
             ) as mon_sess:
                 c_op_vals, g_op_vals = self._train(mon_sess, c_ops, g_ops)
             logging.info('Last evaluated losses: critic: %s, generator, %s'
