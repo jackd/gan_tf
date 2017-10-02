@@ -41,6 +41,12 @@ class WGan(Gan):
 class WeightClippedWGan(WGan):
     """WGan implementation with weight clipping."""
 
+    def __init__(self, *args, **kwargs):
+        """Redirecting constructor with different default name."""
+        if 'name' not in kwargs:
+            kwargs['name'] = 'wgan-wc'
+        super(WeightClippedWGan, self).__init__(*args, **kwargs)
+
     def get_train_ops(self, real_logits, fake_logits, global_step):
         """
         Get operations for training critic and generator.
@@ -69,6 +75,12 @@ class GradientPenalizedWGan(WGan):
     See Gulrajani et al for details, https://arxiv.org/pdf/1704.00028.pdf .
     """
 
+    def __init__(self, *args, **kwargs):
+        """Redirecting constructor with different default name."""
+        if 'name' not in kwargs:
+            kwargs['name'] = 'wgan-gp'
+        super(GradientPenalizedWGan, self).__init__(*args, **kwargs)
+
     def get_losses(
             self, real_logits, fake_logits, real_samples, fake_samples, mode):
         """
@@ -88,8 +100,11 @@ class GradientPenalizedWGan(WGan):
         eps_shape = [batch_size] + [1]*(len(real_samples.shape)-1)
         eps = tf.random_uniform(shape=eps_shape, name='eps')
         mixed_samples = eps * real_samples + (1 - eps) * fake_samples
-        mixed_logits = self.get_scoped_critic_logits(
+        # mixed_logits = self.get_scoped_critic_logits(
+        #     mixed_samples, mode=mode, reuse=True)
+        mixed_logits = self._call_critic_logits_fn(
             mixed_samples, mode=mode, reuse=True)
+
         grad = tf.gradients(mixed_logits, mixed_samples)[0]
         norm_axes = range(1, len(grad.shape))
         grad_n = tf.sqrt(tf.reduce_sum(grad**2, axis=norm_axes))

@@ -42,11 +42,21 @@ def _load_global_step_from_checkpoint_dir(checkpoint_dir):
         return 0
 
 
+def _eval_and_get_collection_additions(
+        fn, collection=tf.GraphKeys.GLOBAL_VARIABLES):
+    pre_vars = tf.get_collection(collection)
+    output = fn()
+    var_diff = tf.get_collection(collection)
+    for v in pre_vars:
+        var_diff.remove(v)
+    return output, list(var_diff)
+
+
 class Gan(object):
     """Base class for Generative Adversarial Networks."""
 
     def __init__(self, generator_fn, critic_logits_fn, model_dir=None,
-                 config=None, params=None, name=None):
+                 config=None, params=None, name='gan'):
         """
         Construct a `Gan` instance.
 
@@ -60,6 +70,8 @@ class Gan(object):
                         this function
                     * `config`: optional configuration opject passed into this
                         function, or the default config
+                    * `reuse`: bool indicating whether variables should be
+                        reused
                 * Returns:
                     * generated_sample
 
@@ -70,6 +82,8 @@ class Gan(object):
                         output)
                     * `params`: same as `generator_fn`
                     * `config`: same as `generator_fn`
+                    * `reuse`: bool indicating whether variables should be
+                        reused
                 * Returns:
                     * critic_logits
             model_dir: directory to save to
@@ -115,12 +129,6 @@ class Gan(object):
             'n_critic_loops': 5,
         }.copy()
 
-    def _named(self, unmodified_name):
-        if self._name is None:
-            return unmodified_name
-        else:
-            return '%s/%s' % (self._name, unmodified_name)
-
     @property
     def model_dir(self):
         """Get the model directory for this GAN."""
@@ -137,29 +145,49 @@ class Gan(object):
             kwargs['config'] = self._config
         return kwargs
 
-    def _call_generator_fn(self, features, mode):
+    def _call_generator_fn(self, features, mode, reuse=False):
         if mode in self._generator_kwargs:
             self._generator_kwargs['mode'] = mode
-        return self._generator_fn(features=features, **self._generator_kwargs)
 
-    def _call_critic_logits_fn(self, sample, mode):
+        def generate():
+            return self._generator_fn(
+                features=features, reuse=reuse,
+                **self._generator_kwargs)
+        if not reuse:
+            generated_sample, self._generator_vars = \
+                _eval_and_get_collection_additions(generate)
+            return generated_sample
+        else:
+            return generate()
+
+    def _call_critic_logits_fn(self, sample, mode, reuse=False):
         if mode in self._critic_logits_kwargs:
             self._critic_logits_kwargs['mode'] = mode
-        return self._critic_logits_fn(sample, **self._critic_logits_kwargs)
 
-    def get_scoped_generator_sample(
-            self, features, mode=tf.estimator.ModeKeys.PREDICT, reuse=None):
-        """Get the discriminator sample wrapped in a variable scope."""
-        with tf.variable_scope(self._named('generator'), reuse=reuse):
-            sample = self._call_generator_fn(features, mode)
-        return sample
+        def get_critic_logits():
+            return self._critic_logits_fn(
+                sample, reuse=reuse, **self._critic_logits_kwargs)
 
-    def get_scoped_critic_logits(
-            self, sample, mode=tf.estimator.ModeKeys.PREDICT, reuse=None):
-        """Get the critic logits wrapped in a variable scope."""
-        with tf.variable_scope(self._named('critic'), reuse=reuse):
-            logits = self._call_critic_logits_fn(sample, mode)
-        return logits
+        if not reuse:
+            logits, self._critic_vars = \
+                _eval_and_get_collection_additions(get_critic_logits)
+            return logits
+        else:
+            return get_critic_logits()
+
+    # def get_generator_sample(
+    #         self, features, mode=tf.estimator.ModeKeys.PREDICT, reuse=None):
+    #     """Get the discriminator sample wrapped in a variable scope."""
+    #     with tf.variable_scope(self._named('generator'), reuse=reuse):
+    #         sample = self._call_generator_fn(features, mode)
+    #     return sample
+
+    # def get_scoped_critic_logits(
+    #         self, sample, mode=tf.estimator.ModeKeys.PREDICT, reuse=None):
+    #     """Get the critic logits wrapped in a variable scope."""
+    #     with tf.variable_scope(self._named('critic'), reuse=reuse):
+    #         logits = self._call_critic_logits_fn(sample, mode)
+    #     return logits
 
     def get_losses(
             self, real_logits, fake_logits, real_samples, fake_samples, mode):
@@ -182,19 +210,19 @@ class Gan(object):
         g_loss = -c_fake_loss
         return c_loss, g_loss
 
-    def _vars(self, suffix, graph=None):
-        if graph is None:
-            graph = tf
-        return graph.get_collection(
-            tf.GraphKeys.TRAINABLE_VARIABLES, scope=self._named(suffix))
+    # def _vars(self, suffix, graph=None):
+    #     if graph is None:
+    #         graph = tf
+    #     return graph.get_collection(
+    #         tf.GraphKeys.TRAINABLE_VARIABLES, scope=self._named(suffix))
 
-    def critic_vars(self, graph=None):
-        """Get all variables associated with the discriminator."""
-        return self._vars('critic', graph=graph)
-
-    def generator_vars(self,  graph=None):
-        """Get all variables associated with the generator."""
-        return self._vars('generator', graph=graph)
+    # def critic_vars(self, graph=None):
+    #     """Get all variables associated with the discriminator."""
+    #     return self._vars('critic', graph=graph)
+    #
+    # def generator_vars(self,  graph=None):
+    #     """Get all variables associated with the generator."""
+    #     return self._vars('generator', graph=graph)
 
     def get_critic_opt(self, critic_loss, critic_vars, global_step):
         """Get critic optimization operation."""
@@ -222,25 +250,31 @@ class Gan(object):
 
         """
         mode = tf.estimator.ModeKeys.TRAIN
-        fake_samples = self.get_scoped_generator_sample(
-            generator_inputs, mode)
-        fake_logits = self.get_scoped_critic_logits(fake_samples, mode)
-        real_logits = self.get_scoped_critic_logits(
+        # fake_samples = self.get_scoped_generator_sample(
+        #     generator_inputs, mode)
+        fake_samples = self._call_generator_fn(
+            generator_inputs, mode, reuse=False)
+        # fake_logits = self.get_scoped_critic_logits(fake_samples, mode)
+        fake_logits = self._call_critic_logits_fn(
+            fake_samples, mode, reuse=False)
+        # real_logits = self.get_scoped_critic_logits(
+        #     real_samples, mode, reuse=True)
+        real_logits = self._call_critic_logits_fn(
             real_samples, mode, reuse=True)
         critic_loss, generator_loss = self.get_losses(
             real_logits, fake_logits, real_samples, fake_samples, mode=mode)
         tf.summary.scalar('c_loss', critic_loss)
         tf.summary.scalar('g_loss', generator_loss)
 
-        critic_vars = self.critic_vars()
-        with tf.variable_scope(self._named('c_opt')):
+        # critic_vars = self.critic_vars()
+        with tf.name_scope('%s/c_opt' % self._name):
             critic_opt = self.get_critic_opt(
-                critic_loss, critic_vars, global_step)
+                critic_loss, self._critic_vars, global_step)
 
-        generator_vars = self.generator_vars()
-        with tf.variable_scope(self._named('g_opt')):
+        # generator_vars = self.generator_vars()
+        with tf.name_scope('%s/g_opt' % self._name):
             generator_opt = self.get_generator_opt(
-                generator_loss, generator_vars, global_step)
+                generator_loss, self._generator_vars, global_step)
 
         critic_ops = {'loss': critic_loss, 'opt': critic_opt}
         generator_ops = {'loss': generator_loss, 'opt': generator_opt}
@@ -286,7 +320,9 @@ class Gan(object):
                         'g_loss': g_loss,
                         'step': global_step,
                     },
-                    every_n_iter=100),
+                    # every_n_iter=100
+                    every_n_secs=30
+                    ),
                 basic_session_run_hooks.StopAtStepHook(steps, max_steps)
             ]
 
@@ -357,14 +393,15 @@ class Gan(object):
                         yield output_val
 
     def generate(self, generator_input_fn, iterate_batches=True,
-                 mode=tf.estimator.ModeKeys.PREDICT):
+                 mode=tf.estimator.ModeKeys.PREDICT, reuse=False):
         """Generate data based on inputs generated by generator_input_fn."""
         generator_input = generator_input_fn(
             **self._fn_kwargs(generator_input_fn))
         # with tf.variable_scope('generator'):
         #     sample = self._call_generator_fn(
         #         generator_input, mode)
-        sample = self.get_scoped_generator_sample(generator_input, mode=mode)
+        # sample = self.get_scoped_generator_sample(generator_input, mode=mode)
+        sample = self._generator_fn(generator_input, mode=mode, reuse=reuse)
         return self._run_sess(sample, iterate_batches=iterate_batches)
 
     def discriminate(self, sample_input_fn, iterate_batches=True,
