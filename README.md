@@ -1,3 +1,6 @@
+# DEPRECATED
+See `tf.contrib.gan` module.
+
 # gan_tf
 Classes similar to `tf.estimator.Estimator` for training generative adversarial networks (GANs) using tensorflow.
 
